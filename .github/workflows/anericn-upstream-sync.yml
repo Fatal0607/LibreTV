@@ -11,6 +11,11 @@ on:
   schedule:
     - cron: "30 2 * * *" # 北京时间 10:30
   workflow_dispatch:
+  # 只存在于非默认分支的工作流要先被某个事件触发过，GitHub 才会登记它，之后才能 dispatch。
+  # 改动本文件时顺便跑一次，也算自检。
+  push:
+    branches: [anericn]
+    paths: [.github/workflows/anericn-upstream-sync.yml]
 
 permissions:
   contents: write

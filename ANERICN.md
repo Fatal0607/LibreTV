@@ -45,7 +45,7 @@
 
 ### 自动同步
 
-工作流 `anericn-upstream-sync` 每天北京时间 10:30 运行一次，也可以在 Actions 页面手动触发，或者执行 `gh workflow run anericn-upstream-sync.yml --ref anericn -R Fatal0607/LibreTV`。它会拉取上游 `LibreSpark/LibreTV` 的 `main` 分支，尝试合并进 `anericn`，合并提交信息为 `chore: merge upstream vX.Y.Z`：
+工作流 `anericn-upstream-sync` 每天北京时间 10:30 运行一次，也可以在 Actions 页面手动触发，或者执行 `gh workflow run anericn-upstream-sync.yml --ref anericn -R Fatal0607/LibreTV`。修改这个工作流文件并推送到 `anericn` 时，它也会运行一次。它会拉取上游 `LibreSpark/LibreTV` 的 `main` 分支，尝试合并进 `anericn`，合并提交信息为 `chore: merge upstream vX.Y.Z`：
 
 - **已经是最新**：什么也不做。
 - **无冲突，且 `npm ci`、`npm run typecheck`、`npm test` 都通过**：直接推送到 `anericn`，然后显式触发 `anericn-image` 构建镜像。用 `GITHUB_TOKEN` 推送的提交不会触发 push 事件，所以需要显式触发。
