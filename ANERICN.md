@@ -19,7 +19,7 @@
 - `src/lib/server-sources.ts`、`src/lib/admin-auth.ts`、`src/lib/server-sources-sync.ts`，以及各自的 `*.test.ts`
 - `src/app/api/admin/sources/route.ts`（及测试）
 - `src/components/server-sources-panel.tsx`
-- `.github/workflows/anericn-image.yml`
+- `.github/workflows/anericn-image.yml`、`.github/workflows/anericn-upstream-sync.yml`
 - `ANERICN.md`（本文件）
 
 对上游文件只做了少量修改，代码里都用 `anericn` 注释标出：
@@ -43,10 +43,23 @@
 
 ## 跟进上游更新
 
+### 自动同步
+
+工作流 `anericn-upstream-sync` 每天北京时间 10:30 运行一次，也可以在 Actions 页面手动触发，或者执行 `gh workflow run anericn-upstream-sync.yml --ref anericn -R Fatal0607/LibreTV`。它会拉取上游 `LibreSpark/LibreTV` 的 `main` 分支，尝试合并进 `anericn`，合并提交信息为 `chore: merge upstream vX.Y.Z`：
+
+- **已经是最新**：什么也不做。
+- **无冲突，且 `npm ci`、`npm run typecheck`、`npm test` 都通过**：直接推送到 `anericn`，然后显式触发 `anericn-image` 构建镜像。用 `GITHUB_TOKEN` 推送的提交不会触发 push 事件，所以需要显式触发。
+- **有冲突或检查失败**：不推送 `anericn`，而是把合并结果提交到 `upstream-sync/<日期>-<上游短提交号>` 分支，再开一个 PR 到 `anericn`。PR 描述里会列出冲突文件，冲突标记原样留在分支上。同一个上游提交只开一个 PR。处理方法：在这个分支上解决冲突后，用 **merge commit** 方式合并 PR，不要用 squash。合并后推送到 `anericn` 会自动构建镜像。
+- **上游改动了 `.github/workflows/` 下的文件**：`GITHUB_TOKEN` 没有推送工作流文件的权限，这时运行会直接失败并报出文件名，需要按下面的步骤手动合并。
+
+**定时触发的前提**：GitHub 只认**默认分支**上的工作流文件里的 `schedule`。本 fork 的默认分支目前还是 `main`，所以定时任务暂时不会自动运行，只能手动触发。要让定时生效，需要在仓库 Settings → General 里把默认分支改成 `anericn`。这一步只改仓库设置，不会改动 `main` 的内容。
+
+### 手动合并
+
 ```bash
 git fetch upstream
 git switch anericn
-git merge upstream/main        # 有冲突时，基本只会出现在上表的几个文件里
+git merge upstream/main -m "chore: merge upstream vX.Y.Z"   # 有冲突时，基本只会出现在上表的几个文件里
 npm ci && npm run typecheck && npm test
 git push origin anericn        # 推送后会自动构建新镜像
 ```

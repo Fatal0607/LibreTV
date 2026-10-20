@@ -1,0 +1,173 @@
+name: anericn-upstream-sync
+
+# 每天把上游 LibreSpark/LibreTV 的 main 合并进 anericn 分支：
+# - 已包含上游最新提交：什么也不做。
+# - 合并无冲突且 typecheck / test 通过：直接推送 anericn，再显式触发 anericn-image 构建镜像
+#   （GITHUB_TOKEN 推送的提交不会触发 push 事件，所以要手动 dispatch）。
+# - 有冲突或测试失败：不动 anericn，把合并结果提交到 upstream-sync/<日期>-<上游短提交号> 分支，开 PR 等人处理。
+# 注意：schedule 只在仓库默认分支上的工作流文件生效，见 ANERICN.md「跟进上游更新」。
+
+on:
+  schedule:
+    - cron: "30 2 * * *" # 北京时间 10:30
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write # gh workflow run 需要
+
+concurrency:
+  group: anericn-upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: https://github.com/LibreSpark/LibreTV.git
+  UPSTREAM_BRANCH: main
+  TARGET_BRANCH: anericn
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+
+      - name: 拉取上游
+        id: upstream
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_REPO"
+          git fetch --no-tags upstream "$UPSTREAM_BRANCH"
+          sha="$(git rev-parse "upstream/$UPSTREAM_BRANCH")"
+          version="$(git show "upstream/$UPSTREAM_BRANCH:package.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")"
+          {
+            echo "sha=$sha"
+            echo "short=${sha::7}"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor "$sha" HEAD; then
+            echo "uptodate=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$TARGET_BRANCH 已包含上游 ${sha::7}（v$version），无需合并"
+          else
+            echo "uptodate=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 合并上游
+        id: merge
+        if: steps.upstream.outputs.uptodate == 'false'
+        env:
+          UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
+          VERSION: ${{ steps.upstream.outputs.version }}
+        run: |
+          base="$(git rev-parse HEAD)"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          message="chore: merge upstream v$VERSION"
+          if git merge --no-ff --no-edit -m "$message" "$UPSTREAM_SHA"; then
+            echo "status=merged" >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "conflicts<<EOF"
+              git diff --name-only --diff-filter=U
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            # 带冲突标记提交，PR 里能直接看到冲突位置
+            git add -A
+            git commit --no-edit -m "$message"
+            echo "status=conflict" >> "$GITHUB_OUTPUT"
+          fi
+          # GITHUB_TOKEN 没有 workflows 权限，推送改动了 .github/workflows 的提交会被拒绝
+          {
+            echo "workflow_changes<<EOF"
+            git diff --name-only "$base" HEAD -- .github/workflows
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        if: steps.merge.outputs.status == 'merged'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 类型检查与单测
+        id: verify
+        if: steps.merge.outputs.status == 'merged'
+        run: |
+          for cmd in "npm ci" "npm run typecheck" "npm test"; do
+            echo "::group::$cmd"
+            if ! $cmd; then
+              echo "::endgroup::"
+              echo "failed=$cmd" >> "$GITHUB_OUTPUT"
+              echo "::warning::$cmd 失败，改为开 PR"
+              exit 0
+            fi
+            echo "::endgroup::"
+          done
+          echo "failed=" >> "$GITHUB_OUTPUT"
+
+      - name: 上游改动了工作流文件
+        if: steps.merge.outputs.workflow_changes != ''
+        env:
+          WORKFLOW_CHANGES: ${{ steps.merge.outputs.workflow_changes }}
+        run: |
+          echo "::error::上游改动了以下工作流文件，GITHUB_TOKEN 无权推送，请按 ANERICN.md 手动合并：$(echo "$WORKFLOW_CHANGES" | paste -sd ' ')"
+          exit 1
+
+      - name: 推送 anericn 并触发镜像构建
+        if: steps.merge.outputs.status == 'merged' && steps.verify.outputs.failed == ''
+        env:
+          VERSION: ${{ steps.upstream.outputs.version }}
+        run: |
+          git push origin "HEAD:$TARGET_BRANCH"
+          gh workflow run anericn-image.yml --ref "$TARGET_BRANCH"
+          echo "::notice::已合并上游 v$VERSION 并触发 anericn-image"
+
+      - name: 开 PR 等人处理
+        if: steps.merge.outputs.status == 'conflict' || steps.verify.outputs.failed != ''
+        env:
+          UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
+          SHORT: ${{ steps.upstream.outputs.short }}
+          VERSION: ${{ steps.upstream.outputs.version }}
+          CONFLICTS: ${{ steps.merge.outputs.conflicts }}
+          FAILED: ${{ steps.verify.outputs.failed }}
+        run: |
+          marker="upstream-sha: $UPSTREAM_SHA"
+          existing="$(gh pr list --state open --base "$TARGET_BRANCH" --json url,body \
+            --jq "map(select(.body | contains(\"$marker\"))) | .[0].url // empty")"
+          if [ -n "$existing" ]; then
+            echo "::notice::上游 $SHORT 已有待处理的 PR：$existing"
+            exit 0
+          fi
+
+          branch="upstream-sync/$(date -u +%Y-%m-%d)-$SHORT"
+          git push origin "HEAD:refs/heads/$branch"
+
+          {
+            echo "自动合并上游 [LibreSpark/LibreTV@$SHORT](https://github.com/LibreSpark/LibreTV/commit/$UPSTREAM_SHA)（v$VERSION）没能直接推送到 \`$TARGET_BRANCH\`。"
+            echo
+            if [ -n "$CONFLICTS" ]; then
+              echo "### 冲突文件"
+              echo
+              echo "以下文件带着冲突标记提交在本分支上，需要手动解决："
+              echo
+              while IFS= read -r file; do
+                echo "- \`$file\`"
+              done <<< "$CONFLICTS"
+            else
+              echo "### 检查失败"
+              echo
+              echo "合并没有冲突，但 \`$FAILED\` 失败了，详见 [运行日志]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)。"
+            fi
+            echo
+            echo "处理完后合并本 PR（选 merge commit，不要 squash），推送到 \`$TARGET_BRANCH\` 会自动构建镜像。"
+            echo
+            echo "<!-- $marker -->"
+          } > pr-body.md
+
+          gh pr create --base "$TARGET_BRANCH" --head "$branch" \
+            --title "chore: merge upstream v$VERSION" --body-file pr-body.md
