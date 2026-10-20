@@ -80,6 +80,8 @@ export interface QualityEntry {
    * 两者在 UI 上都显示「未知」，靠这个字段区分出「源站不给」和「我们没够着」。
    */
   error?: string;
+  /** anericn：码率（kbps），探测按分片大小估算或取 master 声明值，播放时按实际下载量实测 */
+  kbps?: number;
   /** 记录时间（epoch ms），用于 LRU 淘汰与失败重试 */
   timestamp: number;
 }
@@ -95,6 +97,8 @@ export interface QualityProbeResult {
   sourceKey: string;
   vodId: string;
   height?: number;
+  /** anericn：码率（kbps） */
+  kbps?: number;
   error?: string;
 }
 

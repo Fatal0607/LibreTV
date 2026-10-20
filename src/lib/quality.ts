@@ -120,16 +120,24 @@ export function mergeQualityEntries(
 
   for (const [key, value] of Object.entries(incoming)) {
     const prev = next[key];
+    // anericn：只带码率的实测（播放时按下载量测得）只更新码率，不改动来源与高度——
+    // 否则探测高度会被升格成「实测」冻住，之后真正的实测高度反而盖不过它
+    if (value.from === 'play' && value.height === undefined && value.kbps !== undefined) {
+      next[key] = prev ? { ...prev, kbps: value.kbps } : { from: 'probe', kbps: value.kbps, timestamp: now };
+      continue;
+    }
     if (prev?.from === 'play') {
       if (value.from !== 'play') continue;
       const best = Math.max(prev.height ?? 0, value.height ?? 0);
-      next[key] = { from: 'play', height: best || undefined, timestamp: now };
+      // anericn：码率用最新一次实测（累计下载量越多越准），本次没测到就沿用之前的
+      next[key] = { from: 'play', height: best || undefined, kbps: value.kbps ?? prev.kbps, timestamp: now };
       continue;
     }
     if (prev?.from === 'probe' && value.from === 'probe' && prev.height !== undefined && value.height === undefined) {
       continue;
     }
-    next[key] = value;
+    // anericn：这次没测到码率（实测还没攒够、或码率探测超时）就沿用之前的
+    next[key] = prev?.kbps !== undefined && value.kbps === undefined ? { ...value, kbps: prev.kbps } : value;
   }
 
   const overflow = Object.keys(next).length - QUALITY_MAX_ENTRIES;

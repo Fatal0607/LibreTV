@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { SearchResultItem, SourceConfig } from '@/lib/types';
 import { useAppStore } from '@/lib/store';
 import { qualityKey } from '@/lib/quality';
+import { compareQualityEntries } from '@/lib/quality-bitrate';
 import { compactRemarks, formatRemarks, inferGroupRemarks } from '@/lib/remarks';
 import { cn } from '@/lib/utils';
 import { SmartImage } from './smart-image';
@@ -124,16 +125,16 @@ export function AggregatedCard({
   // 展开面板按画质降序（同级保持原有源顺序）：探到一个更好的就往上走，
   // 用户不必自己横向比较三行灰字。没探到 / 未探到的排在最后。
   const heightOf = (item: SearchResultItem) => qualities[qualityKey(item.sourceKey, item.vodId)]?.height ?? 0;
+  // anericn：同档位再按码率排（同样 1080P，码率高的更清楚）
   const sortedItems = useMemo(() => {
-    const height = (item: SearchResultItem) => qualities[qualityKey(item.sourceKey, item.vodId)]?.height ?? 0;
+    const entryOf = (item: SearchResultItem) => qualities[qualityKey(item.sourceKey, item.vodId)];
     return group.items
       .map((item, index) => ({ item, index }))
-      .sort((a, b) => height(b.item) - height(a.item) || a.index - b.index)
+      .sort((a, b) => compareQualityEntries(entryOf(a.item), entryOf(b.item)) || a.index - b.index)
       .map((entry) => entry.item);
   }, [group.items, qualities]);
-  const bestHeight = sortedItems.reduce((max, item) => Math.max(max, heightOf(item)), 0);
-  // 并列最高时只强调排在第一的那一行：三个源里框两个等于没有推荐
-  const firstBest = sortedItems.find((item) => bestHeight > 0 && heightOf(item) === bestHeight);
+  // 并列最高时只强调排在第一的那一行：三个源里框两个等于没有推荐（排序后第一个就是最清楚的）
+  const firstBest = sortedItems[0] && heightOf(sortedItems[0]) > 0 ? sortedItems[0] : undefined;
   const bestKey = firstBest ? qualityKey(firstBest.sourceKey, firstBest.vodId) : undefined;
   // 各源集数一致时（常见：同剧多源同步更新）只在表头说一次，逐行不再重复
   const remarksList = sortedItems.map((item) => compactRemarks(item.remarks));

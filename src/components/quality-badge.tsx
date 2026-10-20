@@ -2,6 +2,7 @@
 
 import { cn } from '@/lib/utils';
 import { describeQualityBadge } from '@/lib/quality';
+import { formatBitrate } from '@/lib/quality-bitrate';
 import type { QualityEntry } from '@/lib/types';
 
 /**
@@ -28,6 +29,9 @@ export function QualityBadge({
 }) {
   const view = describeQualityBadge(entry, loading);
   if (!view) return null;
+  // anericn：码率跟在档位后面，同样 1080P 的源能直接比出谁更清楚
+  const bitrate = formatBitrate(entry?.kbps);
+  const bitrateTitle = bitrate ? `；码率约 ${bitrate}bps（同档位下码率越高越清晰）` : '';
 
   if (view.kind === 'loading') {
     return (
@@ -51,9 +55,10 @@ export function QualityBadge({
           height >= 1080 ? 'bg-accent/15 text-accent' : height > 0 && height < 480 ? 'bg-chip text-faint' : 'bg-chip text-muted',
           className
         )}
-        title={view.title}
+        title={view.title + bitrateTitle}
       >
         {view.label}
+        {bitrate && <span className="ml-1 font-normal opacity-75 tabular-nums">{bitrate}</span>}
       </span>
     );
   }
@@ -86,9 +91,9 @@ export function QualityBadge({
   return (
     <span
       className={cn('tag shrink-0', view.kind === 'failed' ? 'bg-warning/15 text-warning' : 'bg-chip text-faint', className)}
-      title={view.title}
+      title={view.title + (view.kind === 'failed' ? '' : bitrateTitle)}
     >
-      {view.kind === 'failed' ? view.label ?? '未测到' : '未知'}
+      {view.kind === 'failed' ? view.label ?? '未测到' : bitrate ? `码率 ${bitrate}` : '未知'}
       {showReason && view.reason && <span className="ml-0.5 opacity-80">·{view.reason}</span>}
     </span>
   );

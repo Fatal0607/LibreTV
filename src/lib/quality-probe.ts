@@ -7,6 +7,8 @@ import {
 import { cmsRequestHeaders, parseDetail, parseDetailPageHtml } from './cms-parser';
 import { fetchUpstream } from './fetch-utils';
 import { inferHeightFromBitrate } from './quality';
+import { parseBestBandwidthKbps } from './quality-bitrate';
+import { probeSegmentBitrate } from './quality-bitrate-probe';
 import { checkUpstreamAllowed } from './ssrf';
 import type { QualityProbeItem, QualityProbeResult, SourceConfig } from './types';
 
@@ -322,7 +324,7 @@ async function probeEpisode(
   source: SourceConfig,
   merged: AbortSignal,
   signal?: AbortSignal
-): Promise<{ height?: number; error?: string }> {
+): Promise<{ height?: number; kbps?: number; error?: string }> {
   // 末尾允许 ?query / #fragment：不少源在 .m3u8 后挂鉴权参数或分片锚点
   const isM3u8 = /\.m3u8([?#]|$)/i.test(target);
 
@@ -342,10 +344,15 @@ async function probeEpisode(
   const text = await readTextPrefix(res, M3U8_MAX_BYTES);
 
   const height = parseBestHeight(text);
-  if (height !== undefined) return { height };
+  if (height !== undefined) return { height, kbps: parseBestBandwidthKbps(text) };
 
   // 单码率媒体列表：m3u8 里没有档位信息，下沉到分片挖分辨率
-  return { height: await withSegmentBudget(target, text, source, merged, signal) };
+  // anericn：同时用中间分片的大小估算码率（各自有独立预算，互不拖累）
+  const [segmentHeight, kbps] = await Promise.all([
+    withSegmentBudget(target, text, source, merged, signal),
+    probeSegmentBitrate(text, target, probeHeaders(source), merged),
+  ]);
+  return { height: segmentHeight, kbps };
 }
 
 /**
@@ -375,16 +382,19 @@ export async function probeQuality(item: QualityProbeItem, signal?: AbortSignal)
 
     const startedAt = Date.now();
     let lastError: string | undefined;
+    let kbps: number | undefined;
     for (const target of probeEpisodeOrder(episodes)) {
       const r = await probeEpisode(target, source, merged, signal);
-      if (r.height !== undefined) return { ...base, height: r.height };
+      if (r.height !== undefined) return { ...base, height: r.height, kbps: r.kbps };
+      kbps ??= r.kbps;
       if (r.error) lastError = r.error;
       // 源站级拒绝（401/403）换集也不会变，不必再耗一轮超时
       if (lastError && /^HTTP (401|403)$/.test(lastError)) break;
       // 慢源换集重试会把 8s 总死线打穿，反而把「未知」变成「探测失败」：时间过半就不再换集
       if (Date.now() - startedAt > QUALITY_PROBE_TIMEOUT_MS / 2) break;
     }
-    return lastError ? { ...base, error: lastError } : base;
+    if (lastError) return { ...base, error: lastError };
+    return kbps === undefined ? base : { ...base, kbps };
   } catch (err) {
     // 客户端主动中止：不算失败，也不该污染缓存
     if (signal?.aborted) throw err;

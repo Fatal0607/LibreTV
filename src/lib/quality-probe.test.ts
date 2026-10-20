@@ -234,7 +234,11 @@ describe('probeQuality 降级到分片解析', () => {
     const result = await probeQuality({ source: SOURCE, id: '123' });
     expect(result.height).toBe(1080);
     expect(urls()).toContain('https://cdn.test/2024/01/abc/init.mp4');
-    expect(urls().some((u) => u.endsWith('.m4s'))).toBe(false);
+    // anericn：码率估算会对中间分片发只取头部的 Range 请求（bytes=0-0），这不算下载
+    const downloads = mocks.fetchUpstream.mock.calls.filter(
+      ([u, o]) => String(u).endsWith('.m4s') && (o as { headers?: Record<string, string> })?.headers?.Range !== 'bytes=0-0'
+    );
+    expect(downloads).toHaveLength(0);
   });
 
   it('SAMPLE-AES 加密：服务端解不开，放弃而不是给出错误分辨率', async () => {

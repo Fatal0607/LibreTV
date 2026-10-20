@@ -33,6 +33,41 @@
 | `src/app/page.tsx` | 搜索时按地址对已选源去重（本机源与共享源地址相同时只搜一次） |
 | `Dockerfile` / `docker-compose.yml` / `.env.example` / `.gitignore` | 数据目录、数据卷、`ADMIN_PASSWORD` |
 
+## 定制内容：画质标签显示码率，并按「档位 → 码率」排序
+
+实测下来，采集站的片源大多只有一档清晰度，分辨率普遍不低。真正决定画面清不清楚的是码率：同一部片在不同源上，码率可能从 0.5 Mbps 到 7 Mbps 不等。所以这个分支在画质徽章上加了码率（如「1080P 4.1M」），并按以下规则排序：
+
+- **换源面板**：当前源置顶；其余可用的源按档位、码率从高到低排；画质相同再比测速；不可用的排在最后。
+- **搜索卡片展开的来源列表**：先比档位，同档位再比码率。
+
+码率有三个来源：
+
+1. **多档 master 列表**：取最高档的 `AVERAGE-BANDWIDTH`，没有这一项时取 `BANDWIDTH`。
+2. **单档列表**：在最长的那段正片里（避开插播广告）取中间分片，用 `Range: bytes=0-0` 请求它，从响应头读出完整大小，再除以分片时长。分片本身不下载。BYTERANGE 列表直接放弃。
+3. **播放时实测**：按 hls.js 实际下载的分片累计计算，攒够 20 秒后上报，之后每 60 秒更新一次。实测值会覆盖探测值。
+
+### 改动的文件
+
+新增文件：`src/lib/quality-bitrate.ts`、`src/lib/quality-bitrate-probe.ts`、`src/lib/bitrate-meter.ts`，以及各自的 `*.test.ts`。
+
+对上游文件的修改：
+
+| 文件 | 改动 |
+| --- | --- |
+| `src/lib/types.ts` | `QualityEntry` / `QualityProbeResult` 加 `kbps` |
+| `src/lib/quality.ts` | `mergeQualityEntries` 保留码率；只带码率的实测不升格为实测条目 |
+| `src/lib/quality-probe.ts` | 探测结果带上码率 |
+| `src/lib/quality-probe.test.ts` | fMP4 用例允许只取头部的 Range 请求 |
+| `src/app/api/quality/route.ts` | 缓存里加 `kbps` |
+| `src/components/use-quality-probe.ts` | 探测结果 → 缓存条目时带上 `kbps` |
+| `src/components/quality-badge.tsx` | 档位后面显示码率 |
+| `src/components/switch-source.tsx` | 按档位 → 码率排序，画质相同再比测速 |
+| `src/components/video-card.tsx` | 同档位按码率排序 |
+| `src/components/player-shell.tsx` | 新增 `onBitrate`，按已下载分片实测码率 |
+| `src/app/watch/page.tsx` | 把实测码率写回画质缓存 |
+
+> 上游正在频繁迭代画质相关代码，以后合并上游时，冲突最可能出在上表这几个文件里。
+
 ## 镜像
 
 推送到 `anericn` 分支后，GitHub Actions（`anericn-image`）会先跑类型检查和单测，通过后构建 `linux/amd64` 镜像：

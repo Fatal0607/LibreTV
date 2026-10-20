@@ -43,6 +43,7 @@ function getSharedQueue(): ProbeQueue {
 
 const toEntry = (result: QualityProbeResult): QualityEntry => ({
   height: result.height,
+  kbps: result.kbps,
   from: 'probe',
   error: result.error,
   timestamp: Date.now(),

@@ -256,6 +256,13 @@ function WatchContent() {
                       [qualityKey(sourceKey, vodId)]: { height, from: 'play', timestamp: Date.now() },
                     });
                   }}
+                  onBitrate={(kbps) => {
+                    // anericn：实测码率回写，换源列表据此比较同档位源的清晰度
+                    if (!sourceKey || !vodId) return;
+                    useAppStore.getState().setQuality({
+                      [qualityKey(sourceKey, vodId)]: { kbps, from: 'play', timestamp: Date.now() },
+                    });
+                  }}
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center">

@@ -5,6 +5,7 @@ import Artplayer from 'artplayer';
 import Hls, { type HlsConfig } from 'hls.js';
 
 import { PlaybackRecovery, describeHlsError } from '@/lib/playback-recovery';
+import { createBitrateMeter } from '@/lib/bitrate-meter';
 import { createHlsLoader } from '@/lib/hls-loader';
 import {
   getVideoPrefetcher,
@@ -50,6 +51,8 @@ interface PlayerShellProps {
    * 下次搜索同一部剧就能直接显示画质，不必再探测。
    */
   onQuality?: (height: number) => void;
+  /** anericn：实测码率（kbps），按实际下载的分片累计，攒够时长才回调 */
+  onBitrate?: (kbps: number) => void;
   /** 恢复策略判源不可用（重试耗尽/格式硬失败）时回调：父级弹出换源面板 */
   onRequestSwitchSource?: (reason: string) => void;
 }
@@ -67,6 +70,7 @@ export function PlayerShell({
   onEnded,
   onPause,
   onQuality,
+  onBitrate,
   onRequestSwitchSource,
 }: PlayerShellProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -82,11 +86,11 @@ export function PlayerShell({
   // 始终持有最新 props/回调，避免重建播放器
   const propsRef = useRef({
     url, title, adFilter, autoplayNext, episodeKey, nextUrl, nextEpisodeKey,
-    getRestorePosition, onTimeUpdate, onEnded, onPause, onQuality, onRequestSwitchSource,
+    getRestorePosition, onTimeUpdate, onEnded, onPause, onQuality, onBitrate, onRequestSwitchSource,
   });
   propsRef.current = {
     url, title, adFilter, autoplayNext, episodeKey, nextUrl, nextEpisodeKey,
-    getRestorePosition, onTimeUpdate, onEnded, onPause, onQuality, onRequestSwitchSource,
+    getRestorePosition, onTimeUpdate, onEnded, onPause, onQuality, onBitrate, onRequestSwitchSource,
   };
 
   /** 上报实测画质：多次上报取大值由调用方决定，这里只管把拿到的高度传出去 */
@@ -234,6 +238,13 @@ export function PlayerShell({
     });
     // 播放链路恢复（FRAG_LOADED / MANIFEST_PARSED）：静默窗外清零连续失败计数
     hls.on(Hls.Events.FRAG_LOADED, () => recoveryRef.current?.markHealthy());
+    // anericn：按实际下载的主视频分片累计实测码率
+    const bitrateMeter = createBitrateMeter();
+    hls.on(Hls.Events.FRAG_LOADED, (_evt, data) => {
+      if (data.frag.type !== 'main') return;
+      const kbps = bitrateMeter.add(data.payload?.byteLength, data.frag.duration);
+      if (kbps) propsRef.current.onBitrate?.(kbps);
+    });
     // 单码率源在 MANIFEST 阶段拿不到 height（清单尚未解析），这里补一次。
     // 注意 data.level 是档位下标，分辨率在 levelInfo 上
     hls.on(Hls.Events.LEVEL_LOADED, (_evt, data) => {

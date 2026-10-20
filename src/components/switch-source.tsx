@@ -7,6 +7,7 @@ import type { SourceConfig, SearchResultItem } from '@/lib/types';
 import { buildWatchUrl, cn } from '@/lib/utils';
 import { useAppStore, resolveSource } from '@/lib/store';
 import { qualityKey } from '@/lib/quality';
+import { compareQualityEntries } from '@/lib/quality-bitrate';
 import { useToast } from './toast';
 import { Icon } from './icon';
 import { SmartImage } from './smart-image';
@@ -152,6 +153,13 @@ export function SwitchSourceModal({
     const aCurrent = a.source.key === currentSourceKey && String(a.result.vodId) === String(currentVodId);
     const bCurrent = b.source.key === currentSourceKey && String(b.result.vodId) === String(currentVodId);
     if (aCurrent !== bCurrent) return aCurrent ? -1 : 1;
+    // anericn：可用的源按「档位 → 码率」排，越清楚越靠前；画质相同再比测速
+    if (a.ok !== b.ok) return a.ok ? -1 : 1;
+    const byQuality = compareQualityEntries(
+      qualities[qualityKey(a.source.key, a.result.vodId)],
+      qualities[qualityKey(b.source.key, b.result.vodId)]
+    );
+    if (byQuality !== 0) return byQuality;
     const msA = a.ok ? a.ms ?? 99_999 : 99_999;
     const msB = b.ok ? b.ms ?? 99_999 : 99_999;
     return msA - msB;
