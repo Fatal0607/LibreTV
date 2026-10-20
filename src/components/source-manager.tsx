@@ -5,6 +5,7 @@ import { Drawer } from './drawer';
 import { ConfirmDialog } from './confirm-dialog';
 import { Icon, type IconName } from './icon';
 import { LiveSourceManager } from './live-source-manager';
+import { ServerSourcesPanel } from './server-sources-panel';
 import {
   HealthBadge,
   SearchInput,
@@ -39,7 +40,7 @@ import { describeParseStats } from '@/lib/tvbox-parser';
  */
 
 type PrimaryTab = 'sources' | 'prefs' | 'data';
-type SecondaryTab = 'vod' | 'live' | 'subs' | 'playback' | 'image' | 'home' | 'io';
+type SecondaryTab = 'vod' | 'live' | 'subs' | 'server' | 'playback' | 'image' | 'home' | 'io';
 
 const PRIMARY_TABS: { id: PrimaryTab; label: string; icon: IconName }[] = [
   { id: 'sources', label: '源管理', icon: 'link' },
@@ -52,6 +53,7 @@ const SECONDARY_TABS: Record<PrimaryTab, { id: SecondaryTab; label: string }[]> 
     { id: 'vod', label: '点播源' },
     { id: 'live', label: '直播源' },
     { id: 'subs', label: '数据源订阅' },
+    { id: 'server', label: '全站共享' },
   ],
   prefs: [
     { id: 'playback', label: '播放与过滤' },
@@ -136,6 +138,7 @@ export function SourceManagerDrawer({ open, onClose }: { open: boolean; onClose:
       {current === 'image' && <ImagePanel />}
       {current === 'home' && <HomePanel />}
       {current === 'subs' && <SourceSubscriptions />}
+      {current === 'server' && <ServerSourcesPanel />}
       {current === 'io' && <ConfigIoPanel />}
     </Drawer>
   );
@@ -487,7 +490,7 @@ function VodSourceRow({
             {api.isAdult && <span className="text-pink-400 text-xs ml-1">(18+)</span>}
             {isEnv && (
               <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-chip text-faint align-middle">
-                部署者预置
+                {api.key.startsWith('srv_') ? '全站共享' : '部署者预置'}
               </span>
             )}
             {fromSubscription && (

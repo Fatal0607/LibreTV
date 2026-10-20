@@ -98,16 +98,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.invalidateQueries();
     toast('验证成功', 'success');
     // 预置订阅（DEFAULT_SUBSCRIPTIONS）的首屏同步发生在登录之前，会 401 静默失败，
-    // 这里用缓存中的 /api/status 补跑一次（缓存缺失时回落为一次请求）
+    // 这里重新拉一次 /api/status 补跑（anericn：全站共享源只在登录后下发，不能复用登录前的缓存）
     try {
-      const cached = queryClient.getQueryData<AuthStatusResponse>(STATUS_QUERY_KEY);
-      const status =
-        cached ??
-        (await queryClient.fetchQuery<AuthStatusResponse>({
-          queryKey: STATUS_QUERY_KEY,
-          queryFn: () => api.status(),
-          staleTime: 0,
-        }));
+      const status = await queryClient.fetchQuery<AuthStatusResponse>({
+        queryKey: STATUS_QUERY_KEY,
+        queryFn: () => api.status(),
+        staleTime: 0,
+      });
       if (status) await applyEnvPresets(status);
     } catch {
       // 补拉预置数据失败不影响登录后的正常使用

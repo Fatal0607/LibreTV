@@ -3,6 +3,8 @@ node_modules/
 out/
 .env
 .env*.local
+# anericn：本地运行时的全站共享源数据
+/data/
 *.tsbuildinfo
 vitest-results.json
 *.log

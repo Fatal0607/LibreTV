@@ -10,10 +10,15 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    # 无状态服务：观看历史在浏览器 IndexedDB、设置在 localStorage，无需挂载卷
+    # 观看历史在浏览器 IndexedDB、设置在 localStorage；
+    # anericn：全站共享源保存在 /app/data，用数据卷持久化
+    volumes:
+      - libretv-data:/app/data
     environment:
       # 必填：访问密码（在 .env 中设置，缺失时 compose 启动即报错提醒）
       - PASSWORD=${PASSWORD:?请在 .env 中设置 PASSWORD}
+      # anericn：管理密码，用于在「设置 → 源管理 → 全站共享」把源同步到服务器（不设置则无法同步）
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       # 可选：会话/代理签名密钥（多实例部署建议显式设置：openssl rand -hex 32）
       # - PROXY_SECRET=your-secret
       # 可选：Cookie Secure 策略覆盖（true=强制开启 / false=强制关闭；不设置时按请求协议自动推导，HTTP 部署无需配置）
@@ -39,3 +44,6 @@ services:
       # - USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36
       # 可选：影视榜单推荐源（60s API）实例地址，官方公共实例有限流
       # - 60S_API_BASE=https://60s.crystelf.top
+
+volumes:
+  libretv-data:

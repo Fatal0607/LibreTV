@@ -22,6 +22,10 @@ ENV HOSTNAME=0.0.0.0
 # 非 root 用户
 RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 
+# anericn：全站共享源落盘目录（挂载数据卷），需要让非 root 用户可写
+ENV DATA_DIR=/app/data
+RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
+
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public

@@ -266,7 +266,14 @@ interface AppState extends AppSettings {
 
 /** 全部可用直播源（预置 + 用户订阅）合并视图 */
 export function allLiveSources(state: Pick<AppState, 'liveEnvSources' | 'liveSubscriptions'>): LiveSourceConfig[] {
-  return [...state.liveEnvSources, ...state.liveSubscriptions.map((s) => ({ key: `sub_${s.url}`, name: s.name || s.url, url: s.url, epg: s.epg }))];
+  // anericn：同一地址既是预置（含全站共享）又在本机订阅里时只保留预置那条，避免频道列表重复
+  const envUrls = new Set(state.liveEnvSources.map((s) => s.url));
+  return [
+    ...state.liveEnvSources,
+    ...state.liveSubscriptions
+      .filter((s) => !envUrls.has(s.url))
+      .map((s) => ({ key: `sub_${s.url}`, name: s.name || s.url, url: s.url, epg: s.epg })),
+  ];
 }
 
 function nextCustomKey(apiList: SourceConfig[]): string {

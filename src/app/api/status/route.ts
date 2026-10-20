@@ -5,6 +5,7 @@ import { getEnvLiveSources } from '@/lib/env-live-sources';
 import { getEnvSubscriptions } from '@/lib/env-subscriptions';
 import { getEnvRecommendSource } from '@/lib/env-recommend-source';
 import { getEnvImageMode } from '@/lib/env-image-mode';
+import { mergeServerLive, mergeServerVod, readServerSources } from '@/lib/server-sources';
 
 export const runtime = 'nodejs';
 
@@ -12,15 +13,17 @@ export const runtime = 'nodejs';
 export async function GET(req: Request) {
   const passwordRequired = isPasswordConfigured();
   const verified = passwordRequired && sessionFromCookieHeader(req.headers.get('cookie'));
+  // anericn：全站共享源只读一次，点播与直播取自同一版本
+  const shared = verified ? readServerSources() : null;
   return NextResponse.json({
     passwordRequired,
     verified,
     // 构建时由 next.config.ts 从 package.json 注入
     version: process.env.APP_VERSION || 'dev',
-    // 部署者通过 DEFAULT_SOURCES 预置的采集站
-    defaultSources: getEnvSources(),
+    // 部署者通过 DEFAULT_SOURCES 预置的采集站（anericn：登录后再并入全站共享源，未登录不外泄）
+    defaultSources: shared ? mergeServerVod(getEnvSources(), shared) : getEnvSources(),
     // 部署者通过 DEFAULT_LIVE_SOURCES 预置的直播源（M3U 订阅）
-    defaultLiveSources: getEnvLiveSources(),
+    defaultLiveSources: shared ? mergeServerLive(getEnvLiveSources(), shared) : getEnvLiveSources(),
     // 部署者通过 DEFAULT_SUBSCRIPTIONS 预置的 SourceList 订阅链接
     defaultSubscriptions: getEnvSubscriptions(),
     // 部署者通过 DEFAULT_RECOMMEND_SOURCE 指定的首页推荐数据源默认值（未配置时为 null）

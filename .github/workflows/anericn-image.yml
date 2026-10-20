@@ -1,0 +1,71 @@
+name: anericn-image
+
+# anericn 定制分支的镜像构建：推送到 anericn 分支即构建，发布到
+# ghcr.io/<owner>/libretv，标签为 anericn（滚动）、<package.json 版本>-anericn、sha-<短提交号>。
+# 服务器是 x86_64，只构建 linux/amd64，省掉 arm64 的一半时间。
+# 上游自带的 docker-publish.yml 只在推 v* 标签时触发，本分支不推标签，两者互不干扰。
+
+on:
+  push:
+    branches: [anericn]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: anericn-image
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 计算镜像名与标签
+        id: meta
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/libretv"
+          version="$(node -p "require('./package.json').version")"
+          {
+            echo "tags<<EOF"
+            echo "${image}:anericn"
+            echo "${image}:${version}-anericn"
+            echo "${image}:sha-${GITHUB_SHA::7}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

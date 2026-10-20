@@ -64,12 +64,14 @@ function HomeContent() {
 
   const selectedSources = useMemo(() => {
     // selectedKeys 可能含历史残留的重复 key：按 key 去重，避免同源重复搜索
+    // anericn：改为按地址去重——本机手动源与全站共享源同地址时也只搜一次
     const seen = new Set<string>();
     return selectedKeys
       .map((key) => resolveSource({ customAPIs, envSources }, key))
       .filter((s): s is NonNullable<typeof s> => {
-        if (!s || !validateSourceUrl(s.url) || seen.has(s.key)) return false;
-        seen.add(s.key);
+        const dedupeKey = s?.url.replace(/\/+$/, '');
+        if (!s || !dedupeKey || !validateSourceUrl(s.url) || seen.has(dedupeKey)) return false;
+        seen.add(dedupeKey);
         return true;
       })
       // 自动停用期内的源不参与搜索（到期自动恢复）
