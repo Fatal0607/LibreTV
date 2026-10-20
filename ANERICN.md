@@ -1,6 +1,6 @@
 # anericn 定制分支说明
 
-本仓库 fork 自 [LibreSpark/LibreTV](https://github.com/LibreSpark/LibreTV)。定制改动都在 **`anericn` 分支**上，`main` 分支保留的是 2025 年的旧版内容，没有改动。部署在 https://tv.anericn.top 。
+本仓库 fork 自 [LibreSpark/LibreTV](https://github.com/LibreSpark/LibreTV)。定制改动都在 **`anericn` 分支**上（也是仓库的默认分支），`main` 分支保留的是 2025 年的旧版内容，没有改动。部署在 https://tv.anericn.top 。
 
 ## 定制内容：全站共享源
 
@@ -52,7 +52,7 @@
 - **有冲突或检查失败**：不推送 `anericn`，而是把合并结果提交到 `upstream-sync/<日期>-<上游短提交号>` 分支，再开一个 PR 到 `anericn`。PR 描述里会列出冲突文件，冲突标记原样留在分支上。同一个上游提交只开一个 PR。处理方法：在这个分支上解决冲突后，用 **merge commit** 方式合并 PR，不要用 squash。合并后推送到 `anericn` 会自动构建镜像。
 - **上游改动了 `.github/workflows/` 下的文件**：`GITHUB_TOKEN` 没有推送工作流文件的权限，这时运行会直接失败并报出文件名，需要按下面的步骤手动合并。
 
-**定时触发的前提**：GitHub 只认**默认分支**上的工作流文件里的 `schedule`。本 fork 的默认分支目前还是 `main`，所以定时任务暂时不会自动运行，只能手动触发。要让定时生效，需要在仓库 Settings → General 里把默认分支改成 `anericn`。这一步只改仓库设置，不会改动 `main` 的内容。
+**定时触发的前提**：GitHub 只认**默认分支**上的工作流文件里的 `schedule`，所以本 fork 的默认分支已经设为 `anericn`（Settings → General）。这只是仓库设置，`main` 的内容没有改动。
 
 ### 手动合并
 
