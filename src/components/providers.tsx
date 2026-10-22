@@ -9,6 +9,7 @@ import { GlobalDownloadManager } from './download-manager';
 import { useAppStore, hydrateLiveProbeResults } from '@/lib/store';
 import { api, STATUS_QUERY_KEY } from '@/lib/client-api';
 import { applyEnvPresets } from '@/lib/subscription-sync';
+import { resetLegacyProbeCache } from '@/lib/quality-cache-reset';
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
@@ -27,6 +28,8 @@ export function Providers({ children }: { children: ReactNode }) {
     // 避免 setEnvSources/setLiveEnvSources 的勾选合并发生在 rehydrate 之前被覆盖
     Promise.resolve(useAppStore.persist.rehydrate())
       .then(() => {
+        // anericn：画质探测改为核实实际分片，一次性清掉旧的声明值探测记录
+        resetLegacyProbeCache();
         // 测活缓存从 IndexedDB 恢复（并顺带搬迁旧 localStorage 快照里的存量），
         // 与下方 /api/status 拉取互不依赖，失败静默
         void hydrateLiveProbeResults();

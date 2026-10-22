@@ -51,6 +51,24 @@ export function parseBestBandwidthKbps(text: string): number | undefined {
   return bestValue > 0 ? Math.round(bestValue / 1000) : undefined;
 }
 
+/** master playlist 里峰值码率最高那一档的子列表地址（相对路径原样返回）；非 master 返回 undefined */
+export function pickTopVariantUri(text: string): string | undefined {
+  if (!text.includes('#EXT-X-STREAM-INF')) return undefined;
+  let best: { peak: number; uri: string } | undefined;
+  let pending: number | undefined;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (line.startsWith('#EXT-X-STREAM-INF')) {
+      pending = parseInt(line.match(/(?<![-A-Z])BANDWIDTH=(\d+)/)?.[1] || '0', 10);
+      continue;
+    }
+    if (pending === undefined || !line || line.startsWith('#')) continue;
+    if (!best || pending > best.peak) best = { peak: pending, uri: line };
+    pending = undefined;
+  }
+  return best?.uri;
+}
+
 /**
  * 选一个用来估算码率的分片：在最长的那段（按 DISCONTINUITY 切分，避开插播广告）里取中间分片，
  * 片头多是黑场/片头曲，码率偏低不具代表性。

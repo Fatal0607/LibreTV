@@ -7,7 +7,7 @@ import {
 import { cmsRequestHeaders, parseDetail, parseDetailPageHtml } from './cms-parser';
 import { fetchUpstream } from './fetch-utils';
 import { inferHeightFromBitrate } from './quality';
-import { parseBestBandwidthKbps } from './quality-bitrate';
+import { parseBestBandwidthKbps, pickTopVariantUri } from './quality-bitrate';
 import { probeSegmentBitrate } from './quality-bitrate-probe';
 import { checkUpstreamAllowed } from './ssrf';
 import type { QualityProbeItem, QualityProbeResult, SourceConfig } from './types';
@@ -252,7 +252,8 @@ async function probeSegmentResolution(
     if (initUrl) {
       const buf = await fetchBytesPrefix(initUrl, INIT_PREFIX_BYTES, source, signal);
       const found = buf ? parseMp4VideoResolution(buf) : undefined;
-      if (found) return found.height;
+      // anericn：取短边，与 parseBestHeight 口径一致
+      if (found) return Math.min(found.width, found.height);
     }
   }
 
@@ -272,8 +273,9 @@ async function probeSegmentResolution(
   }
 
   // 按内容判断容器比按扩展名可靠：不少源的分片没有扩展名
-  if (looksLikeMp4(buf)) return parseMp4VideoResolution(buf)?.height;
-  return parseTsVideoResolution(buf)?.height;
+  // anericn：取短边，与 parseBestHeight 口径一致（竖屏/旋转片源不会被标成 2K）
+  const found = looksLikeMp4(buf) ? parseMp4VideoResolution(buf) : parseTsVideoResolution(buf);
+  return found ? Math.min(found.width, found.height) : undefined;
 }
 
 /** 取影片的播放地址列表（与 /api/detail 同逻辑：列表接口优先，拿不到再爬详情页） */
@@ -324,7 +326,7 @@ async function probeEpisode(
   source: SourceConfig,
   merged: AbortSignal,
   signal?: AbortSignal
-): Promise<{ height?: number; kbps?: number; error?: string }> {
+): Promise<{ height?: number; kbps?: number; unverified?: boolean; error?: string }> {
   // 末尾允许 ?query / #fragment：不少源在 .m3u8 后挂鉴权参数或分片锚点
   const isM3u8 = /\.m3u8([?#]|$)/i.test(target);
 
@@ -344,7 +346,16 @@ async function probeEpisode(
   const text = await readTextPrefix(res, M3U8_MAX_BYTES);
 
   const height = parseBestHeight(text);
-  if (height !== undefined) return { height, kbps: parseBestBandwidthKbps(text) };
+  if (height !== undefined) {
+    // anericn：采集站的 master 声明值常是模板（每部片都写同一个分辨率/码率），
+    // 下沉到最高档的实际分片核实；核实不出来才用声明值兜底
+    const verified = await verifyTopVariant(target, text, source, merged, signal);
+    if (verified.height !== undefined) {
+      // 核实成功：高度、码率都只用实测值，码率没测到也不拿模板声明值凑数
+      return { height: verified.height, kbps: verified.kbps };
+    }
+    return { height, kbps: verified.kbps ?? parseBestBandwidthKbps(text), unverified: true };
+  }
 
   // 单码率媒体列表：m3u8 里没有档位信息，下沉到分片挖分辨率
   // anericn：同时用中间分片的大小估算码率（各自有独立预算，互不拖累）
@@ -385,7 +396,7 @@ export async function probeQuality(item: QualityProbeItem, signal?: AbortSignal)
     let kbps: number | undefined;
     for (const target of probeEpisodeOrder(episodes)) {
       const r = await probeEpisode(target, source, merged, signal);
-      if (r.height !== undefined) return { ...base, height: r.height, kbps: r.kbps };
+      if (r.height !== undefined) return { ...base, height: r.height, kbps: r.kbps, ...(r.unverified ? { unverified: true } : {}) };
       kbps ??= r.kbps;
       if (r.error) lastError = r.error;
       // 源站级拒绝（401/403）换集也不会变，不必再耗一轮超时
@@ -401,6 +412,50 @@ export async function probeQuality(item: QualityProbeItem, signal?: AbortSignal)
     return { ...base, error: err instanceof Error ? err.message : '探测失败' };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * anericn：多码率源追到最高档子列表（最多再嵌套一层 master），
+ * 对它的实际分片做分辨率解析与码率估算。任何一步失败都返回空结论，由调用方退回声明值。
+ */
+const MIN_VERIFIED_HEIGHT = 120;
+const MAX_VERIFIED_HEIGHT = 4320;
+
+async function verifyTopVariant(
+  masterUrl: string,
+  masterText: string,
+  source: SourceConfig,
+  merged: AbortSignal,
+  clientSignal?: AbortSignal
+): Promise<{ height?: number; kbps?: number }> {
+  try {
+    let url = masterUrl;
+    let text = masterText;
+    for (let depth = 0; depth < 2 && text.includes('#EXT-X-STREAM-INF'); depth++) {
+      const uri = pickTopVariantUri(text);
+      const next = uri ? resolveUrl(url, uri) : undefined;
+      if (!next) return {};
+      const verdict = await checkUpstreamAllowed(next);
+      if (!verdict.ok) return {};
+      const res = await fetchUpstream(next, { timeoutMs: 6000, headers: probeHeaders(source), signal: merged });
+      if (!res.ok) return {};
+      url = next;
+      text = await readTextPrefix(res, M3U8_MAX_BYTES);
+    }
+    if (text.includes('#EXT-X-STREAM-INF')) return {};
+    const [height, kbps] = await Promise.all([
+      withSegmentBudget(url, text, source, merged, clientSignal),
+      probeSegmentBitrate(text, url, probeHeaders(source), merged),
+    ]);
+    // 码率估算会吞掉中止：客户端已断开时必须抛出，否则半截结果会被当成结论缓存
+    if (clientSignal?.aborted) throw new DOMException('已取消', 'AbortError');
+    // 片头广告、解析异常可能给出离谱高度：超出合理范围就当没核实出来，退回声明值
+    const plausible = height !== undefined && height >= MIN_VERIFIED_HEIGHT && height <= MAX_VERIFIED_HEIGHT;
+    return { height: plausible ? height : undefined, kbps };
+  } catch {
+    if (clientSignal?.aborted) throw new DOMException('已取消', 'AbortError');
+    return {};
   }
 }
 

@@ -66,6 +66,17 @@
 | `src/components/player-shell.tsx` | 新增 `onBitrate`，按已下载分片实测码率 |
 | `src/app/watch/page.tsx` | 把实测码率写回画质缓存 |
 
+### 多档源也核实实际分片（不再直接采信 m3u8 声明值）
+
+采集站的 master 列表里写的分辨率和码率，常常是模板值。比如非凡、量子每部片都声明 1080×608 @ 800K，实际分片却是 1920×1080 @ 约 1.5 Mbps；光速每部片都声明 4096 kbps，实际约 1.5 Mbps。所以现在探测的做法是：
+
+- 多档源沿着最高档追到实际视频分片（最多再嵌套一层 master），用分片里的真实分辨率（取短边）和真实码率。
+- 核实成功时，高度和码率都只用实测值，码率没测到也不拿声明值凑数。
+- 核实失败时退回声明值，并标为 `unverified`：服务端缓存 2 分钟，浏览器缓存 6 小时，到期后重新核实。
+- 上线时每个浏览器会执行一次 `quality-cache-reset.ts`，清掉旧的「探测」画质记录（播放实测的记录保留）。
+
+相关改动：`quality-probe.ts`（新增 `verifyTopVariant`，分片解析统一取短边）、`quality.ts`（`unverified` 的 6 小时有效期）、`api/quality/route.ts`、`use-quality-probe.ts`、`types.ts`、`components/providers.tsx`（调用一次缓存重置），新增 `quality-cache-reset.ts`。
+
 > 上游正在频繁迭代画质相关代码，以后合并上游时，冲突最可能出在上表这几个文件里。
 
 ## 镜像

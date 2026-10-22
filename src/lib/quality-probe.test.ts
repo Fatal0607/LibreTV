@@ -23,6 +23,12 @@ const MASTER = `#EXTM3U
 720/index.m3u8
 `;
 
+// anericn：采集站常见的「模板声明」——每部片都写 1080x608 / 800K，实际分片是 1920x1080
+const MASTER_FAKE = `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=1080x608
+1080/index.m3u8
+`;
+
 const SINGLE_TS = `#EXTM3U
 #EXT-X-TARGETDURATION:10
 #EXT-X-MEDIA-SEQUENCE:0
@@ -176,6 +182,8 @@ function route(url: string): Response {
     return new Response(body, { status: 200 });
   }
   if (url === PLAYLIST_URL) return new Response(currentPlaylist, { status: 200 });
+  // anericn：master 的最高档子列表，指向单码率媒体列表
+  if (url.endsWith('/1080/index.m3u8')) return new Response(SINGLE_TS, { status: 200 });
   if (url.endsWith('.ts')) return bytesResponse(buildTs());
   if (url.endsWith('init.mp4')) return bytesResponse(buildInitMp4());
   return new Response('not found', { status: 404 });
@@ -204,17 +212,32 @@ describe('probeEpisodeOrder', () => {
 });
 
 describe('probeQuality 降级到分片解析', () => {
-  it('多码率 master playlist 直接解析档位，不再下载分片', async () => {
-    currentPlaylist = MASTER;
+  // anericn：采集站的 master 声明值常是模板（每部片都写同一个分辨率/码率），
+  // 改为下沉到最高档的实际分片核实，用真实分辨率；声明值只在核实失败时兜底
+  it('多码率 master：下沉到最高档的实际分片，用真实分辨率而不是声明值', async () => {
+    currentPlaylist = MASTER_FAKE;
     mocks.fetchUpstream.mockImplementation((url: string) => Promise.resolve(route(url)));
 
     const result = await probeQuality({ source: SOURCE, id: '123' });
+    expect(result.height).toBe(1080); // 声明是 608，分片 SPS 是 1080
+    expect(result.unverified).toBeUndefined();
+    // 高度核实成功而码率没测到（mock 分片无 Content-Length）：不能拿模板的 800K 凑数
+    expect(result.kbps).toBeUndefined();
+    expect(urls()).toContain('https://cdn.test/2024/01/abc/1080/index.m3u8');
+    expect(urls()).toContain('https://cdn.test/2024/01/abc/1080/seg0.ts');
+  });
+
+  it('多码率 master：最高档子列表打不开时，退回声明值', async () => {
+    currentPlaylist = MASTER;
+    mocks.fetchUpstream.mockImplementation((url: string) =>
+      Promise.resolve(url.endsWith('/index.m3u8') && url !== PLAYLIST_URL ? new Response('', { status: 404 }) : route(url))
+    );
+
+    const result = await probeQuality({ source: SOURCE, id: '123' });
     expect(result.height).toBe(1080);
-    // 详情接口 + m3u8，仅此两次：多码率源没有理由再拉分片
-    expect(urls()).toEqual([
-      'https://api.test/api.php/provide/vod?ac=videolist&ids=123',
-      PLAYLIST_URL,
-    ]);
+    expect(result.error).toBeUndefined();
+    // 声明值没核实过：标出来，客户端只短期缓存，之后重新探测
+    expect(result.unverified).toBe(true);
   });
 
   it('单码率 m3u8：下沉到 TS 分片，从 SPS 拿到 1080', async () => {

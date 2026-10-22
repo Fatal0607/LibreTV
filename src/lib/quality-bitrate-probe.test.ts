@@ -46,7 +46,29 @@ beforeEach(() => {
 });
 
 describe('probeQuality 码率', () => {
-  it('多码率源：返回最高档的声明码率', async () => {
+  it('多码率源：按最高档子列表的实际分片测码率，不采信声明值', async () => {
+    const fakeMaster = `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=4096000,RESOLUTION=1920x1080
+hd/index.m3u8
+`;
+    mocks.fetchUpstream.mockImplementation(async (url: string) => {
+      if (url.includes('ac=videolist')) return new Response(JSON.stringify(detailJson));
+      if (url === PLAYLIST_URL) return textResponse(fakeMaster);
+      if (url === 'https://cdn.test/v/hd/index.m3u8') return textResponse(MEDIA);
+      if (url === 'https://cdn.test/v/hd/seg1.ts') {
+        // 1.95MB / 10s ≈ 1560 kbps（声明 4096）
+        return new Response(new Uint8Array([0x47]), {
+          status: 206,
+          headers: { 'Content-Range': 'bytes 0-0/1950000', 'Content-Length': '1' },
+        });
+      }
+      return new Response(new Uint8Array(0), { status: 200 });
+    });
+    const result = await probeQuality({ source: SOURCE, id: '1' });
+    expect(result.kbps).toBe(1560);
+  });
+
+  it('多码率源：子列表打不开时，退回最高档的声明码率', async () => {
     mocks.fetchUpstream.mockImplementation(async (url: string) => {
       if (url.includes('ac=videolist')) return new Response(JSON.stringify(detailJson));
       if (url === PLAYLIST_URL) return textResponse(MASTER);

@@ -18,6 +18,9 @@ export const QUALITY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
  */
 export const QUALITY_FAIL_TTL_MS = 2 * 60 * 1000;
 
+/** anericn：未经分片核实的声明值（常是模板）只缓存 6 小时，之后重新探测 */
+export const QUALITY_UNVERIFIED_TTL_MS = 6 * 60 * 60 * 1000;
+
 /**
  * 失败原因短标签：徽章上直接显示「未测到·超时」比只藏在 tooltip 里有用，
  * 触屏没有 hover，用户更需要一眼看出「该重试」还是「该换源」。
@@ -49,7 +52,7 @@ export function isRetryableTimeout(error?: string): boolean {
  * 只清理不过滤的话，过期条目会被当成终态显示，且因为「已有结论就不再探」而永不过期。
  */
 export function isQualityEntryFresh(entry: QualityEntry, now = Date.now()): boolean {
-  const ttl = entry.error ? QUALITY_FAIL_TTL_MS : QUALITY_TTL_MS;
+  const ttl = entry.error ? QUALITY_FAIL_TTL_MS : entry.unverified ? QUALITY_UNVERIFIED_TTL_MS : QUALITY_TTL_MS;
   return now - entry.timestamp < ttl;
 }
 

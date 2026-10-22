@@ -5,9 +5,10 @@ import {
   formatBitrate,
   parseBestBandwidthKbps,
   pickBitrateSegment,
+  pickTopVariantUri,
   qualityTier,
 } from './quality-bitrate';
-import { mergeQualityEntries } from './quality';
+import { QUALITY_UNVERIFIED_TTL_MS, isQualityEntryFresh, mergeQualityEntries } from './quality';
 import type { QualityEntry } from './types';
 
 /**
@@ -229,5 +230,30 @@ describe('mergeQualityEntries 保留码率', () => {
       NOW,
     );
     expect(merged.k).toMatchObject({ from: 'play', height: 1080, kbps: 2000 });
+  });
+});
+
+describe('pickTopVariantUri', () => {
+  it('取峰值码率最高那一档，不受 AVERAGE-BANDWIDTH 干扰', () => {
+    const master = `#EXTM3U
+#EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=9000000,BANDWIDTH=2500000,RESOLUTION=1280x720
+720/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080
+1080/index.m3u8
+`;
+    expect(pickTopVariantUri(master)).toBe('1080/index.m3u8');
+  });
+
+  it('非 master 返回 undefined', () => {
+    expect(pickTopVariantUri('#EXTM3U\n#EXTINF:10,\na.ts\n')).toBeUndefined();
+  });
+});
+
+describe('未核实的声明值只短期缓存', () => {
+  it('unverified 的探测结果 6 小时后过期，核实过的仍按 30 天', () => {
+    const later = NOW + QUALITY_UNVERIFIED_TTL_MS + 1;
+    expect(isQualityEntryFresh(entry({ height: 608, unverified: true }), NOW + 60_000)).toBe(true);
+    expect(isQualityEntryFresh(entry({ height: 608, unverified: true }), later)).toBe(false);
+    expect(isQualityEntryFresh(entry({ height: 1080 }), later)).toBe(true);
   });
 });
