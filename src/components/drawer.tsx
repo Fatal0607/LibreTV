@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { Icon } from './icon';
 
@@ -16,6 +16,8 @@ import { Icon } from './icon';
 
 /** 退出过渡时长，需与下方 duration-200 保持一致 */
 const EXIT_MS = 200;
+/** 把手下滑多少 CSS px 判定为「要关闭」（小于该值松手回弹） */
+const DRAG_CLOSE_PX = 64;
 
 /** 抽屉内可聚焦元素选择器 */
 const FOCUSABLE =
@@ -33,6 +35,7 @@ export function Drawer({
   resetScrollKey,
   modal = true,
   mobileSheet = false,
+  mobileFull = false,
   panelStyle,
 }: {
   open: boolean;
@@ -61,6 +64,11 @@ export function Drawer({
    * 需要同时看上方画面的场景（播放页标记）只有底部半屏才成立。
    */
   mobileSheet?: boolean;
+  /**
+   * 小屏（<lg）改为近全屏底部面板（默认 false）。用于内容较多的抽屉（如设置），
+   * 手机上半屏高度明显不够用；保留顶部一条露出遮罩，便于点空白处关闭。
+   */
+  mobileFull?: boolean;
 }) {
   const [mounted, setMounted] = useState(open);
   const [entered, setEntered] = useState(false);
@@ -152,6 +160,48 @@ export function Drawer({
     return () => window.removeEventListener('keydown', handler);
   }, [mounted, onClose, modal]);
 
+  // —— 近全屏形态（mobileFull）的把手拖拽关闭 ——
+  // 把手不是一个"看着能拖其实没用"的装饰条：按住它下滑，面板跟手移动，
+  // 超过阈值松手即关闭，未达阈值回弹。拖动期间临时关掉 class 里的 200ms 过渡，
+  // 否则跟手会被过渡拖成橡皮筋；松手后恢复过渡再交给 class 驱动退出动画。
+  const dragState = useRef<{ id: number; startY: number; dy: number } | null>(null);
+  const beginDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    dragState.current = { id: e.pointerId, startY: e.clientY, dy: 0 };
+    if (panelRef.current) panelRef.current.style.transition = 'none';
+    // 指针可能在这一瞬已经消失（pointercancel 先到），setPointerCapture 会抛错；
+    // 抓不住不影响主流程（move/up 仍会到达元素），不能让它冒成未捕获异常。
+    try {
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    } catch {
+      /* 忽略：降级为不捕获 */
+    }
+  };
+  const moveDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragState.current;
+    const panel = panelRef.current;
+    if (!drag || !panel || e.pointerId !== drag.id) return;
+    drag.dy = Math.max(0, e.clientY - drag.startY);
+    panel.style.transform = `translateY(${drag.dy}px)`;
+  };
+  const endDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragState.current;
+    const panel = panelRef.current;
+    dragState.current = null;
+    if (!drag || !panel) return;
+    panel.style.transition = '';
+    // 松手即回弹：pointercancel（系统抢走手势）也按取消处理
+    if (e.type === 'pointercancel' || drag.dy <= DRAG_CLOSE_PX) {
+      panel.style.transform = '';
+      return;
+    }
+    // 先按把手位置滑出屏幕，动画结束后清掉内联 transform 并走正常关闭流程
+    panel.style.transform = 'translateY(100%)';
+    window.setTimeout(() => {
+      if (panelRef.current) panelRef.current.style.transform = '';
+      onClose();
+    }, EXIT_MS);
+  };
+
   if (!mounted) return null;
 
   return (
@@ -181,12 +231,29 @@ export function Drawer({
           // 小屏底部抽屉：占下半屏、贴底、顶部圆角，留出上半屏给画面
           mobileSheet &&
             'max-lg:inset-x-0 max-lg:top-auto max-lg:bottom-0 max-lg:h-auto max-lg:max-h-[60vh] max-lg:max-w-none max-lg:rounded-t-xl max-lg:border-t max-lg:border-l-0 max-lg:pb-[env(safe-area-inset-bottom)]',
+          // 近全屏底部面板：单列设置项在手机上需要完整高度可用
+          mobileFull &&
+            'max-lg:inset-x-0 max-lg:top-auto max-lg:bottom-0 max-lg:h-[92dvh] max-lg:max-h-[92dvh] max-lg:max-w-none max-lg:rounded-t-xl max-lg:border-t max-lg:border-l-0 max-lg:pb-[env(safe-area-inset-bottom)]',
           entered
             ? 'translate-x-0 max-lg:translate-y-0'
-            : cn('translate-x-full', mobileSheet && 'max-lg:translate-x-0 max-lg:translate-y-full')
+            : cn('translate-x-full', (mobileSheet || mobileFull) && 'max-lg:translate-x-0 max-lg:translate-y-full')
         )}
         style={panelStyle}
       >
+        {mobileFull && (
+          /* 顶部把手：按住下滑可关闭面板（阈值见 DRAG_CLOSE_PX），仅近全屏移动形态出现。
+             touch-none 让浏览器把这段手势交给我们而不是拿去滚动页面。 */
+          <div
+            className="hidden max-lg:flex shrink-0 justify-center pt-2 pb-0.5 touch-none select-none cursor-grab active:cursor-grabbing"
+            aria-hidden
+            onPointerDown={beginDrag}
+            onPointerMove={moveDrag}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+          >
+            <span className="h-1 w-10 rounded-full bg-line" />
+          </div>
+        )}
         <div className="shrink-0 px-4 py-2.5 border-b border-line flex items-center justify-between">
           <h2 className="font-semibold text-content">{title}</h2>
           <button

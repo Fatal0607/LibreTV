@@ -117,6 +117,7 @@ export function SourceManagerDrawer({ open, onClose }: { open: boolean; onClose:
       onClose={onClose}
       title="设置"
       resetScrollKey={current}
+      mobileFull
       subheader={
         <div className="space-y-2">
           <TabRow tabs={PRIMARY_TABS} value={primary} onChange={setPrimary} variant="primary" ariaLabel="设置分类" />
@@ -592,6 +593,12 @@ function PlaybackPanel() {
           description="音量拉到 100% 仍偏小时用：经 Web Audio 增益链把输出再放大约 1.8 倍并软限幅防破音。增益与音量滑块相乘，会让所有档位的响度整体抬高，故默认关闭。跨域直连且未开启 CORS 的直播流受浏览器限制不生效（走代理或 hls.js 的源正常）"
           checked={store.volumeBoost}
           onChange={(v) => store.updateSettings({ volumeBoost: v })}
+        />
+        <ToggleRow
+          label="底部细进度条"
+          description="控制栏收起后，在画面底边常驻一条 3px 进度线，不开控件也能瞄一眼进度。关闭后鼠标移开即完全隐藏（全屏观影不留任何控件），需要看进度时把鼠标移回画面即可"
+          checked={store.miniProgressBar}
+          onChange={(v) => store.updateSettings({ miniProgressBar: v })}
         />
       </div>
 
